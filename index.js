@@ -1,35 +1,28 @@
-const express = require('express');
-const cors = require('cors');
-const sequelize = require('./config/db');
 require('dotenv').config();
 
-// Importar Modelos para que Sequelize los registre
-const Producto = require('./models/producto');
+const app = require('./app');
+const { sequelize } = require('./models');
 
-const app = express();
-
-// --- MIDDLEWARES ---
-// Habilitar CORS para permitir peticiones desde el frontend (React)
-app.use(cors());
-// Parsear el body de las peticiones a JSON
-app.use(express.json());
-
-// --- RUTAS BÁSICAS DE PRUEBA ---
-app.get('/', (req, res) => {
-    res.send('¡API Backend funcionando exitosamente!');
-});
-
-// --- SINCRONIZACIÓN Y ARRANQUE ---
 const PORT = process.env.PORT || 3006;
 
-// force: false evita que se borren los datos cada vez que se reinicia el servidor
-sequelize.sync({ force: false })
-    .then(() => {
-        console.log('Base de datos conectada y sincronizada.');
+async function iniciar() {
+    try {
+        // Verifica que MySQL responda antes de intentar sincronizar
+        await sequelize.authenticate();
+
+        // alter: true agrega las columnas y tablas nuevas sin borrar los datos
+        await sequelize.sync({ alter: true });
+        console.log('Base de datos conectada y tablas sincronizadas');
+
         app.listen(PORT, () => {
             console.log(`Servidor corriendo en http://localhost:${PORT}`);
         });
-    })
-    .catch(error => {
-        console.error('Error al conectar con la base de datos:', error);
-    });
+    } catch (error) {
+        console.error('No se pudo conectar con la base de datos MySQL.');
+        console.error('¿Iniciaste MySQL en XAMPP? Revisa tambien DB_NAME, DB_USER, DB_PASS y DB_HOST en tu archivo .env');
+        console.error('Detalle:', error.message);
+        process.exit(1);
+    }
+}
+
+iniciar();
