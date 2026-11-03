@@ -2,6 +2,8 @@ const { DataTypes } = require('sequelize');
 const bcrypt = require('bcryptjs');
 const sequelize = require('../config/db');
 
+// Seguridad: Sequelize previene SQL Injection porque ejecuta consultas
+// parametrizadas (los valores nunca se concatenan al SQL).
 const Usuario = sequelize.define("Usuario", {
     nombre: {
         type: DataTypes.STRING,
@@ -43,16 +45,18 @@ const Usuario = sequelize.define("Usuario", {
         conPassword: { attributes: { include: ['password'] } }
     },
     hooks: {
-        // Hashea la contrasena antes de insertar el registro
+        // Cifra la contrasena (bcrypt, salt de 10 rondas) antes de insertar el registro
         beforeCreate: async (usuario) => {
             if (usuario.password) {
-                usuario.password = await bcrypt.hash(usuario.password, 10);
+                const salt = await bcrypt.genSalt(10);
+                usuario.password = await bcrypt.hash(usuario.password, salt);
             }
         },
         // Solo re-hashea si el campo password realmente cambio
         beforeUpdate: async (usuario) => {
             if (usuario.changed('password') && usuario.password) {
-                usuario.password = await bcrypt.hash(usuario.password, 10);
+                const salt = await bcrypt.genSalt(10);
+                usuario.password = await bcrypt.hash(usuario.password, salt);
             }
         }
     }

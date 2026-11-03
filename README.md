@@ -1,6 +1,6 @@
 # miApi — Backend de Inventario
 
-API REST del **Panel Administrativo de Inventario** (Laboratorio #9), construida
+API REST del **Panel Administrativo de Inventario** (Laboratorios #9 y #10), construida
 sobre el backend de los Laboratorios #7 y #8. Gestiona categorías, proveedores,
 usuarios, productos y un **kardex de movimientos** con control de stock
 transaccional, además de un endpoint de dashboard con métricas del inventario.
@@ -16,6 +16,9 @@ La consume el frontend **AppInventario** (React).
 | MySQL (XAMPP) | Base de datos |
 | mysql2 | Driver de MySQL |
 | bcryptjs | Hash de contraseñas |
+| jsonwebtoken | Autenticación con JWT |
+| helmet | Cabeceras HTTP seguras |
+| express-rate-limit | Límite de peticiones por IP |
 | cors | Peticiones desde el frontend React |
 | dotenv | Variables de entorno |
 | nodemon | Recarga automática en desarrollo |
@@ -63,6 +66,8 @@ DB_NAME=nombre_de_tu_base
 DB_USER=root
 DB_PASS=
 UMBRAL_BAJO_STOCK=5
+JWT_SECRET=cambia_esto
+JWT_EXPIRES_IN=2h
 ```
 
 `UMBRAL_BAJO_STOCK` define a partir de qué stock un producto se considera bajo
@@ -91,12 +96,13 @@ respuestas de la API.
 ```
 miApi/
 ├── index.js                 arranque: authenticate, sync y listen
-├── app.js                   express, cors, json, rutas, 404 y errores
+├── app.js                   helmet, cors, rate limit, json, rutas, 404 y errores
 ├── config/db.js             conexión Sequelize
 ├── models/                  Categoria, Proveedor, Usuario, Producto, Movimiento
 │   └── index.js             todas las asociaciones
-├── controllers/             lógica de cada recurso
+├── controllers/             lógica de cada recurso (+ authController: register/login)
 ├── routes/                  rutas de cada recurso
+├── middleware/authMiddleware.js  verificación de JWT y roles
 ├── middlewares/error.js     respuestas de error uniformes
 ├── seeders/seed.js          datos de prueba
 ├── postman/                 colección de Postman
@@ -105,8 +111,10 @@ miApi/
 
 ## Endpoints
 
-Todas las respuestas son JSON. Los errores siempre tienen la forma
-`{ "mensaje": "..." }` en español.
+Todas las rutas (salvo `GET /`) cuelgan de **`/api`** y, excepto `/api/auth/*`,
+exigen un token JWT (ver [Seguridad (Lab 10)](#seguridad-lab-10)). Por ejemplo,
+`/productos` ahora es **`/api/productos`**. Los errores de los recursos tienen la
+forma `{ "mensaje": "..." }`; los de autenticación, `{ "error": "..." }`.
 
 ### Generales
 
@@ -254,11 +262,56 @@ el stock y el kardex consistentes entre sí.
 
 `valorInventario` es la suma de `precio × stock` de todos los productos.
 
+
+## Seguridad (Lab 10)
+
+### Protecciones globales ([app.js](app.js))
+
+Se registran en este orden, antes de las rutas:
+
+| Middleware | Protege contra |
+|---|---|
+| `helmet()` | XSS, clickjacking y sniffing de tipo MIME (cabeceras seguras) |
+| `cors({ origin: 'http://localhost:5173', ... })` | Peticiones desde orígenes no autorizados |
+| `rateLimit` (100 peticiones / 15 min por IP en `/api/`) | Fuerza bruta y denegación de servicio |
+| `express.json()` | Debe ir antes de las rutas para que `req.body` exista |
+
+Además, Sequelize usa consultas parametrizadas (previene **SQL Injection**) y las
+contraseñas se cifran con bcrypt (`genSalt(10)` + `hash`) en los hooks
+`beforeCreate` / `beforeUpdate` del modelo `Usuario`.
+
+### Autenticación y roles
+
+1. `POST /api/auth/register` con `{ nombre, email, password, rol }` crea el usuario.
+2. `POST /api/auth/login` con `{ email, password }` devuelve un `token` JWT
+   (firmado con `JWT_SECRET`, vence según `JWT_EXPIRES_IN`).
+3. Las rutas protegidas reciben la cabecera `Authorization: Bearer <token>`.
+
+| Recurso | Quién puede |
+|---|---|
+| `/api/auth/register`, `/api/auth/login` | Cualquiera (abiertas) |
+| GET, POST, PUT de productos, categorías, proveedores; GET y POST de movimientos; GET `/api/dashboard` | Administrador y Almacenero |
+| DELETE de cualquier recurso y todo `/api/usuarios` | Solo Administrador |
+
+| Código | Mensaje |
+|---|---|
+| 403 | `Acceso denegado: Token no proporcionado.` |
+| 401 | `No autorizado: Permisos insuficientes.` |
+| 401 | `Sesión inválida o expirada.` |
+| 401 | `Credenciales inválidas` (login: mismo mensaje si el correo no existe o la clave falla) |
+
+Para probar, **copia `.env.example` a `.env` y cambia `JWT_SECRET`** por un valor
+largo y aleatorio. El archivo `.env` está en `.gitignore` y no debe subirse.
+
 ## Postman
 
 Importa [postman/miApi-Lab9.postman_collection.json](postman/miApi-Lab9.postman_collection.json).
-Trae la variable `{{baseUrl}}` ya apuntando a `http://localhost:3006` y 44
-requests agrupados por recurso, incluyendo los casos de error: crear categoría,
+Trae las variables `{{baseUrl}}` (`http://localhost:3006`), `{{token}}` y
+`{{tokenAlmacenero}}`, y 52 requests. La carpeta **Seguridad (Lab 10)** incluye
+Register, Login (que guarda el token con un script de Tests), GET sin token (403),
+GET con Bearer (200) y DELETE con Almacenero (401). Ejecuta primero los dos
+Login; el resto de la colección usa `{{token}}` automáticamente. Incluye además
+los requests por recurso, incluyendo los casos de error: crear categoría,
 crear producto con `categoria_id`, registrar una Entrada, una Salida sin stock
 suficiente (muestra el `409`) y `GET /dashboard`.
 
